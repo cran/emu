@@ -81,9 +81,9 @@ function (trackdata, left.time, right.time, single = TRUE, average = TRUE,
                 stop("different number of elements in right.time and $ftime")
             }
             if (any(left.time < trackdata$ftime[, 1])) 
-                stop("some left.time values are less than $ftime[,1]")
+                stop("some $ftime[,1] values are less than left.time ")
             if (any(right.time > trackdata$ftime[, 2])) 
-                stop("some right.time values are greater than $ftime[,2]")
+                stop("some $ftime[,2] values are greater than right.time ")
             if (any(right.time <= left.time)) 
                 stop("some right.time values are before the corresponding left.time")
             lval <- nrow(trackdata$index)

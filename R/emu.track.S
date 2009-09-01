@@ -51,7 +51,7 @@
 
 
 "emu.track" <- function(seglist, trackname, cut = NULL, npoints = NULL,
-                        template = attr(seglist, "database"))
+                        template = attr(seglist, "database"), rmfile = TRUE)
 {
   
   s <- as.matrix(seglist)
@@ -71,9 +71,9 @@
   on.exit(.TclEval(sprintf("$%s destroy",as.character(TclSegs))))
   ## fill the Tcl segment list with data from the R seglist
   for(i in c(1:nrow(seglist))) {
-    res <- .Tcl(sprintf("$%s append [list %s %s %s %s]",
+    res <- .Tcl(sprintf("$%s append [list %s%s%s %s %s %s]",
                         as.character(TclSegs),
-                        s[i,1],s[i,2],s[i,3],
+                        "{'",s[i,1],"'}",s[i,2],s[i,3],
                         s[i,4]))
   }
   ## create a tracklist in tcl, a snit object created from within the seglist
@@ -85,6 +85,8 @@
   ##on.exit(.TclEval(sprintf("$%s destroy",as.character(TclTrack))),add=T)
   ## get data from tcl (one string!)
   res = .Tcl(paste("join [",as.character(TclTrack)," cget -data]",sep=""))
+  tmpfiletrx = .TclString(.Tcl(paste(as.character(TclTrack),
+    " cget -tempfile", sep="")))
   samfreq = .TclNum(.Tcl(paste(as.character(TclTrack),
     " cget -origfreq",sep="")))
   numrecs = .TclNum(.Tcl(paste(as.character(TclTrack),
@@ -94,56 +96,23 @@
   strmat <- as.numeric(res)
   type <- attr(seglist, "type")
 
-  result <- NULL
-  result <- matrix(strmat,nrow=numrecs,byrow=TRUE)
+ 
 
-  ## create a simple matrix for event kind of data (one sample)
-  if (missing(npoints) &&  (type == "event" || !missing(cut))) {
-    result=data.frame(result)
-    if (ncol(result) > 1) {
-      colnames <- paste(trackname, 1:ncol(result), sep = "")
-    }
-    else {
-      colnames=trackname
-    }
-    dimnames(result)[[2]] <- make.names(colnames)
+  cat("\n moving data from Tcl to R",sep="\n")
+  result = read.trackdata(tmpfiletrx,trackname)
+  # this is not done by read.trackdata because the tmpfile does not contain key and samfreq information and
+  # if it does once, it does not matter anyway
     if(any(key %in% c("dft", "css", "lps", "cep")))
-      {
-        attr(result, "fs") <- seq(0, samfreq/2, length=ncol(result))
-        class(result) <- c(class(result), "spectral")
-      }
-    return(result)
-  }
-  else {
-    ##complicated stuff, real track data objects
-    segnumbers <- result[,1]
-    times <- result[, 2]
-    data <- result[, c(-1, -2)]
-    data <- as.matrix(data)
-    dimnames(data) <- list(times, paste("T", 1:ncol(data), sep = ""))
-    if (length(unique(segnumbers)) == 1) {
-      index <- cbind(start = 1, end = length(segnumbers))
-      ftime <- cbind(start = times[1], end = times[length(times)])
-    }  else {
-      index <- cumsum(aggregate(data, by = list(segnum = segnumbers), 
-                                FUN = length)[, 2])
-      index <- cbind(start = c(1, index[1:(length(index) - 
-                       1)] + 1), end = index)
-      ftime <- cbind(start = times[index[, 1]], end = times[index[, 
-                                                  2]])
+    {
+      attr(result$data, "fs") <- seq(0, samfreq/2, length=ncol(result$data))
+      class(result$data) <- c(class(result$data), "spectral")
     }
-    result <- as.trackdata(data, index, ftime, trackname)
-    if(any(key %in% c("dft", "css", "lps", "cep")))
-      {
-        attr(result$data, "fs") <- seq(0, samfreq/2, length=ncol(data))
-        class(result$data) <- c(class(result$data), "spectral")
-      }
-    if (nrow(result$ftime) != nseg) {
-      cat(paste(nrow(result$ftime), nseg))
-      stop("error in emu.track: mismatch between number of segments and number of data items read")
-    }
-    return(result)
+  if (rmfile) {
+    file.remove(tmpfiletrx)
   }
+  gc()
+
+  return(result)
 }
 
 
@@ -168,7 +137,9 @@
   if (!file.exists(filename)) {
     return(read.trackdata.twofile(filename, trackname))
   }
-  data <- read.table(filename)
+  data = read.table(filename)
+  #print(object.size(data))
+
   segnumbers <- data[, 1]
   times <- data[, 2]
   data <- data[, c(-1, -2)]
@@ -177,8 +148,7 @@
   if (length(unique(segnumbers)) == 1) {
     index <- cbind(start = 1, end = length(segnumbers))
     ftime <- cbind(start = times[1], end = times[length(times)])
-  }
-  else {
+  } else {
     index <- cumsum(aggregate(data, by = list(segnum = segnumbers), 
                               FUN = length)[, 2])
     index <- cbind(start = c(1, index[1:(length(index) - 
@@ -187,14 +157,20 @@
                                                 2]])
   }
   result <- as.trackdata(data, index, ftime, trackname)
+  
   samfreq <- get.originalFreq(filename)
   key <- get.trackkeywrd(filename)
+
   if(any(key %in% c("dft", "css", "lps", "cep")))
     {
       attr(result$data, "fs") <- seq(0, samfreq/2, length=ncol(data))
       class(result$data) <- c(class(result$data), "spectral")
     }
+  rm(data)
+  gc()
+
   return(result)
+
 }
 
 
@@ -240,20 +216,126 @@
 }
 
 
-"write.trackdata" <- function(trackdata, file) {
-  n <- 0:(nrow(trackdata$index)-1)
-  indices <- rep(n, trackdata$index[,2]-trackdata$index[,1]+1)
-  omat <- NULL
+#"write.trackdata.short" <- function(trackdata, file) {
+#  if (!is.trackdata(trackdata)) 
+#    stop("Argument is not a trackdata object.")
+#    
+#        print(object.size(trackdata))
+#  
+#  n <- 0:(nrow(trackdata$index)-1)
+#  indices <- rep(n, trackdata$index[,2]-trackdata$index[,1]+1)
+#  omat <- NULL
+#
+#  for(j in 1:nrow(trackdata$ftime)){
+#    N <- trackdata$index[j,2]-trackdata$index[j,1]+1
+#    ftimes <- trackdata$ftime[j,]
+#    omat <- c(omat, seq(ftimes[1], ftimes[2], length=N))
+#  }
+#
+#  result <- cbind(indices, omat, trackdata$data)
+#  append=FALSE
+#  if (is.spectral(trackdata)) {
+#    append=TRUE
+#    samfreq <- attr(trackdata$data,"fs")[ncol(trackdata)]
+#    samfreq <- paste("#","Original_Freq", samfreq)
+#    trackname <- paste("#", "Trackname", trackdata$trackname)
+#    cat(samfreq,trackname,file=file,sep="\n")
+#  }
+#  write(t(result), file, ncolumns=ncol(result),append=append)
+#}
 
-  for(j in 1:nrow(trackdata$ftime)){
-    N <- trackdata$index[j,2]-trackdata$index[j,1]+1
-    ftimes <- trackdata$ftime[j,]
-    omat <- c(omat, seq(ftimes[1], ftimes[2], length=N))
+
+"write.trackdata.get" <- function(trackdata, file) {
+
+#system.time(write.trackdata("phr.cc.f0", "F0"))[1] "los"
+#[1] "is trackdata"
+#       User      System verstrichen 
+#     46.838      48.737      97.935 
+#> nrow(phr.cc.f0)
+#[1] 11828
+#object.size(phr.cc.f0)
+#[1] 31890360
+# -- vom original
+#system.time(write.trackdata(phr.cc.f0, "F0"))
+#   User      System verstrichen 
+#    150.914     161.286     314.258 
+
+   
+   if (!inherits(get(trackdata), "trackdata")) 
+    stop("Argument is not a trackdata object.")
+ 
+  ll = nrow(get(trackdata)$ftime)
+  zz <- file(file, "w")
+  on.exit( close(zz))
+  
+    
+  if (is.spectral(trackdata)) {
+    append=TRUE
+    samfreq <- attr(get(trackdata)$data,"fs")[ncol(get(trackdata))]
+    samfreq <- paste("#","Original_Freq", samfreq)
+    trackname <- paste("#", "Trackname", get(trackdata)$trackname)
+    cat(samfreq,trackname,file=zz,sep="\n")
+  }
+  
+  omat = ""
+  sep = " "
+  p = ncol(get(trackdata)[1,])+2
+  for(j in 1:ll){
+  if((j %% 100) == 0) {
+      cat(".")
+  }
+    N <- get(trackdata)$index[j,2]-get(trackdata)$index[j,1]+1
+    cat(c(format(t(cbind(rep(j,N),
+      seq(get(trackdata)$ftime[j,1],get(trackdata)$ftime[j,2], length=N), 
+      get(trackdata)$data[get(trackdata)$index[j,1]:get(trackdata)$index[j,2]])))), 
+      file = zz,sep = c(rep(sep,  p - 1), "\n"))
+     
   }
 
-  result <- cbind(indices, omat, trackdata$data)
-  write(t(result), file, ncolumns=ncol(result))
+  return
 }
+
+
+"write.trackdata" <- function(trackdata, file) {
+  if(is.character(trackdata)) {
+     # print(object.size(trackdata))
+
+      write.trackdata.get(trackdata,file)
+      return(invisible())
+  } 
+  if (object.size(trackdata)>2000000)
+        message("Try write.trackdata(\"trackdata\",file) for larger objects, it is faster and gives progress information.")
+  if (!inherits(trackdata, "trackdata")) 
+    stop("Argument is not a trackdata object.")
+ 
+  ll = nrow(trackdata$ftime)
+  zz <- file(file, "w")
+  on.exit( close(zz))
+  
+  if (is.spectral(trackdata)) {
+    append=TRUE
+    samfreq <- attr(trackdata$data,"fs")[ncol(trackdata)]
+    samfreq <- paste("#","Original_Freq", samfreq)
+    trackname <- paste("#", "Trackname", trackdata$trackname)
+    cat(samfreq,trackname,file=file,sep="\n")
+  }
+ 
+  omat = ""
+  sep = " "
+  p = ncol(trackdata[1,])+2
+  for(j in 1:ll) {
+    N <- trackdata$index[j,2]-trackdata$index[j,1]+1
+    cat(c(format(t(cbind(rep(j,N),
+       seq(trackdata$ftime[j,1], trackdata$ftime[j,2], length=N),
+       trackdata$data[trackdata$index[j,1]:trackdata$index[j,2]])))),
+                                      file = zz,sep = c(rep(sep,  p - 1), "\n"))
+                                      
+     
+  }
+  
+  return(invisible())
+}
+
 
 
 
@@ -268,7 +350,7 @@
 
   type = .TclEval(sprintf("$%s cget -type", as.character(tclRes)))
   type= .TclString(type)
-  segs = .TclEval(sprintf("$%s index", as.character(tclRes)))
+  segs = .TclEval(sprintf("$%s gettext", as.character(tclRes)))
   num = .TclEval(sprintf("$%s numsegs", as.character(tclRes)))
   labs = c()
   stime = c()
@@ -278,16 +360,17 @@
   if(.TclNum(num) == 0) {
     stop(paste("Can't find the query results in emu.query: there may have been a problem with the query command.",sep=""))
   }
-  
-  ## get the date to R
-  for(i in c(0:(.TclNum(num)-1))) {
-    seg=.TclLindex(segs,i)
-    seg=splitstring(tclvalue(seg)," ")
-    labs = c(labs,seg[1])
-    stime= c(stime,as.numeric(seg[2]))
-    etime= c(etime,as.numeric(seg[3]))
-    utts= c(utts,seg[4])
-  }
+  cat("moving data from Tcl to R",sep="\n")
+  ## get the data into R
+  lsegs <- strsplit(tclvalue(segs),"\n")
+  lsegs <- strsplit(lsegs[[1]],"\t")
+  mat <- NULL
+  ## in libemu, segments consist of 5 item
+  mat <- matrix(unlist(lsegs),ncol=5,byrow=TRUE)
+  labs <- mat[,1]
+  stime <- mat[,2]
+  etime <- mat[,3]
+  utts <- mat[,4]
   which = labs=="{}"
   labs[which]="*"
   if (length(labs) == 0) {
@@ -323,9 +406,10 @@
 
   ## fill the segment list with data
   for(i in c(1:nseg)) {
-    res <- .Tcl(sprintf("$%s append [list %s %s %s %s]",
+    #lab <- .TclEval(sprintf("set Tlab \"%s\"", s[i,1]))
+    res <- .Tcl(sprintf("$%s append [list %s%s%s %s %s %s]",
                         as.character(TclSegs),
-                        s[i,1],s[i,2],s[i,3],
+                        "{'",s[i,2],"'}",s[i,2],s[i,3],
                         s[i,4]))
   }
   ##requery
@@ -334,7 +418,13 @@
   on.exit(.TclEval(sprintf("$%s destroy",as.character(TclSegs))),add=TRUE)
   if (justlabels) {
     ##then TclRes is a simple Tcl list containing just labels
-    result=splitstring(tclvalue(tclRes), " ")
+    ##or maybe not so simple, when items contain spaces
+    ##    result=splitstring(tclvalue(tclRes), " ")
+    result=c()
+    length <- .TclNum(.TclEval(sprintf("llength $%s", as.character(tclRes))))
+    for(i in 1:length) {
+      result=c(result,tclvalue(.TclLindex(tclRes,i-1)))
+    }
     return(result)
   }
   else {
@@ -344,7 +434,7 @@
     ##then TclRes is a snit type seglist
     type = .TclEval(sprintf("$%s cget -type", as.character(tclRes)))
     type= .TclString(type)
-    nsegs = .TclEval(sprintf("$%s index", as.character(tclRes)))
+    nsegs = .TclEval(sprintf("$%s gettext", as.character(tclRes)))
     num = .TclEval(sprintf("$%s numsegs", as.character(tclRes)))
     template = .TclEval(sprintf("$%s cget -database", as.character(tclRes)))
     template=.TclString(template)
@@ -356,14 +446,18 @@
     if(.TclNum(num) == 0) {
       stop(paste("Can't find the query results in emu.query: there may have been a problem with the query command.",sep=""))
     }
-    for(i in c(0:(.TclNum(num)-1))) {
-      seg=.TclLindex(nsegs,i)
-      seg=splitstring(tclvalue(seg)," ")
-      labs = c(labs,seg[1])
-      stime= c(stime,as.numeric(seg[2]))
-      etime= c(etime,as.numeric(seg[3]))
-      utts= c(utts,seg[4])
-    }
+    cat("moving data from Tcl to R",sep="\n")
+    ## get the data into R
+    lsegs <- strsplit(tclvalue(nsegs),"\n")
+    lsegs <- strsplit(lsegs[[1]],"\t")
+    mat <- NULL
+
+    ## segments consists of 4 items (5 in the future)
+    mat <- matrix(unlist(lsegs),ncol=4,byrow=TRUE)
+    labs <- mat[,1]
+    stime <- mat[,2]
+    etime <- mat[,3]
+    utts <- mat[,4]
     which = labs=="{}"
     labs[which]="*"
     if (length(labs) == 0) {
@@ -391,7 +485,7 @@
 
 ".TclLindex" <- function(val, i) {
 
-  v <- .Tcl(paste("lindex $", as.character(val), " ", i, sep=""))
+  v <- .TclEval(paste("lindex $", as.character(val), " ", i, sep=""))
   return( v )
 }
 

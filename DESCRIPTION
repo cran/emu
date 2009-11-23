@@ -1,6 +1,6 @@
 Package: emu
-Version: 4.1
-Date: 2009-09-01
+Version: 4.2
+Date: 2009-11-23
 Priority: contrib
 Title: Interface to the Emu Speech Database System
 Author: Jonathan Harrington and others, IPS LMU Muenchen & IPDS CAU
@@ -15,6 +15,6 @@ LazyData: yes
 ZipData: no
 URL: http://emu.sourceforge.net/
 Maintainer: Jonathan Harrington <jmh@phonetik.uni-muenchen.de>
-Packaged: 2009-09-01 12:57:04 UTC; ich
+Packaged: 2009-11-23 10:20:08 UTC; lasse
 Repository: CRAN
-Date/Publication: 2009-09-08 18:13:45
+Date/Publication: 2009-11-23 11:38:26

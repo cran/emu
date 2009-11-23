@@ -64,8 +64,8 @@ if (emu.platform("Windows")) {
 
 
 ## this will get changed by the Makefile
-emu.version<-"4.1"
-emu.date<-"2009-09-01"
+emu.version<-"4.2"
+emu.date<-"2009-11-23"
 
 emu.year<-unlist(strsplit(emu.date, "-"))[1]
 
@@ -126,11 +126,11 @@ the variable 'version'.")
     if( !crashout  && class(tclfound) != "tclObj" ) {
     if (interactive()) {
     cat( "\nLibrary successfully loaded. \n" )
-    cat( "However, some functions that interface to the database notably emu.query() " )
-    cat( "and emu.track() will not work unless you have already " )
+    cat( "However, some functions that interface to the database notably emu.query()\n" )
+    cat( "and emu.track() will not work unless you have already \n" )
     cat( "installed Emu (www.emu.sf.net). \n" )
-    cat( "This R Add-On will not work with EMU version <= 2.0prev!\n" )
-    cat( "If Emu is installed on your system, run the program " )
+    cat( "This R Add-On will not work properly with EMU version < 2.2.4!\n" )
+    cat( "If Emu is installed on your system, run the program \n" )
     cat( "emulink() to establish the link to Emu. \n" )
     }
     }
@@ -293,8 +293,8 @@ the variable 'version'.")
       if( emu.directory == "" ) {
         crashout <- TRUE
        cat( "Link to Emu not established. \n")
-       cat( "Report Bug to www.emu.sf.net with description of your problem. ")
-       cat( "Do not forget to give information about the platform and Emu R and EmuR versions you are running.\n" )
+       cat( "Report Bug to www.emu.sf.net with description of your problem. \n")
+       cat( "Do not forget to give information about \nthe platform, Emu, R and EmuR versions you are running.\n" )
        cat( "Try emulink() again to establish the link to Emu. \n" )    
        
       } else {
